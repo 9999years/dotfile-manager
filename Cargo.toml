@@ -1,0 +1,16 @@
+[package]
+name = "dotfile-manager"
+version = "0.1.0"
+authors = ["Rebecca Turner <rbt@sent.as>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+lazy_static = "1.4.0"
+anyhow = "1.0.26"
+thiserror = "1.0.10"
+console = "0.9.2"
+
+[dev-dependencies]
+pretty_assertions = "0.6.1"
