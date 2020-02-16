@@ -4,13 +4,27 @@ version = "0.1.0"
 authors = ["Rebecca Turner <rbt@sent.as>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "dotfile_manager"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dotfile-manager"
+path = "src/main.rs"
 
 [dependencies]
 lazy_static = "1.4.0"
 anyhow = "1.0.26"
 thiserror = "1.0.10"
 console = "0.9.2"
+dialoguer = "0.5.0"
+json = "0.12.1"
+toml = "0.5.6"
+dirs = "2.0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+gluon = "0.13.1"
+handlebars = "3.0.1"
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"
