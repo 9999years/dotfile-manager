@@ -1,42 +1,26 @@
-use dialoguer::{theme::ColorfulTheme, Checkboxes, Confirmation, Input, OrderList, Select};
+use std::convert::{TryFrom, TryInto};
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
+
+use serde_yaml;
+
+use dotfile_manager::config;
+use dotfile_manager::config::DotfilesWrapper;
+use dotfile_manager::link::AbsDotfile;
 
 fn main() {
-    println!("Example using dialoguer::Input with dialoguer::Validator:");
-    let input0 = Input::<String>::with_theme(&ColorfulTheme::default())
-        .with_prompt("Your email address")
-        .validate_with(|txt: &str| if txt.contains('@') { Ok(()) } else { Err(
-            "An email address must contain an @"
-        ) })
-        .interact()
-        .unwrap();
-    println!("{:?}", input0);
-
-    println!("Checkboxes.");
-    let input = Checkboxes::with_theme(&ColorfulTheme::default())
-        .items(&["run", "info", "install"])
-        .interact()
-        .unwrap();
-    println!("{:?}", input);
-    println!("Confirmation.");
-    let input2 = Confirmation::with_theme(&ColorfulTheme::default())
-        .with_text("Continue?")
-        .interact()
-        .unwrap();
-    println!("{:?}", input2);
-
-    println!("Select.");
-    let input3 = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Select a programming language")
-        .items(&["Rust", "Python", "Haskell", "Java"])
-        .interact()
-        .unwrap();
-    println!("{:?}", input3);
-
-    println!("OrderList");
-    let input4 = OrderList::with_theme(&ColorfulTheme::default())
-        .with_prompt("Rank these drinks")
-        .items(&["Rust", "Python", "Haskell", "Java"])
-        .interact()
-        .unwrap();
-    println!("{:?}", input4);
+    let dotfiles: DotfilesWrapper = serde_yaml::from_reader(BufReader::new(
+        File::open(
+            [&config::CONFIG.dotfile_repo, Path::new("dotfiles.yml")]
+                .iter()
+                .collect::<PathBuf>(),
+        )
+        .unwrap(),
+    ))
+    .unwrap();
+    for df in dotfiles.dotfiles {
+        let abs_df: AbsDotfile = df.try_into().unwrap();
+        println!("{:?}", abs_df);
+    }
 }
