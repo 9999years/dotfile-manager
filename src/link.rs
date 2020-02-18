@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use dialoguer::{theme::ColorfulTheme, Confirmation};
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use symlink;
 
@@ -61,13 +62,15 @@ impl TryFrom<Dotfile> for AbsDotfile {
 
     fn try_from(d: Dotfile) -> io::Result<Self> {
         Ok(AbsDotfile {
-            repo: canonicalize(&CONFIG.dotfile_repo, &d.repo)?,
-            installed: canonicalize(
-                &dirs::home_dir().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, "Home directory not found")
-                })?,
+            repo: make_abs(&CONFIG.dotfile_repo, &d.repo),
+            installed: make_abs(
+                dirs::home_dir()
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::NotFound, "Home directory not found")
+                    })?
+                    .as_path(),
                 d.installed(),
-            )?,
+            ),
         })
     }
 }
@@ -84,11 +87,12 @@ impl TryFrom<AnyDotfile> for AbsDotfile {
     }
 }
 
-fn canonicalize(rel: &Path, p: &Path) -> io::Result<PathBuf> {
+fn make_abs(base: &Path, p: &Path) -> PathBuf {
     if p.is_absolute() {
-        p.canonicalize()
+        p.canonicalize().unwrap_or_else(|_| p.into())
     } else {
-        [rel, p].iter().collect::<PathBuf>().canonicalize()
+        let abs = [base, p].iter().collect::<PathBuf>();
+        abs.canonicalize().unwrap_or(abs)
     }
 }
 
