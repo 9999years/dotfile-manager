@@ -1,12 +1,9 @@
-use std::convert::{TryFrom, TryInto};
-use std::fs::DirBuilder;
 use std::io;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use dirs;
 use lazy_static::lazy_static;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::link::Dotfile;
 

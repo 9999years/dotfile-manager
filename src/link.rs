@@ -4,8 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use dialoguer::{theme::ColorfulTheme, Confirmation};
-use lazy_static::lazy_static;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use symlink;
 
 use crate::config::{AnyDotfile, CONFIG};
