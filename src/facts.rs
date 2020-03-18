@@ -2,23 +2,11 @@ use std::collections::HashMap;
 use std::env;
 
 use futures::executor::{block_on, block_on_stream};
-use gluon::{
-    vm,
-    vm::{primitive, record},
-    Thread,
-};
-use gluon_codegen::{Getable, Pushable, Trace, Userdata, VmType};
 use heim::host::{Arch, Platform as HeimPlatform, User as HeimUser};
 use heim::net::{Address, Nic};
 use lazy_static::lazy_static;
 
-lazy_static! {
-    static ref HEIM_PLATFORM: heim::Result<HeimPlatform> = block_on(heim::host::platform());
-}
-
-#[derive(VmType, Debug, Userdata, Trace)]
-#[gluon(vm_type = "heim.User")]
-#[gluon_trace(skip)]
+#[derive(Debug)]
 pub struct User(HeimUser);
 
 impl From<HeimUser> for User {
@@ -94,23 +82,7 @@ impl Facts {
     // }
 }
 
-pub fn load_user(vm: &Thread) -> vm::Result<vm::ExternModule> {
-    vm::ExternModule::new(vm, whoami::user())
-}
-
-pub fn load_username(vm: &Thread) -> vm::Result<vm::ExternModule> {
-    vm::ExternModule::new(vm, whoami::username())
-}
-
-pub fn load_host(vm: &Thread) -> vm::Result<vm::ExternModule> {
-    vm::ExternModule::new(vm, whoami::host())
-}
-
-pub fn load_hostname(vm: &Thread) -> vm::Result<vm::ExternModule> {
-    vm::ExternModule::new(vm, whoami::hostname())
-}
-
-#[derive(Debug, VmType, Getable, Pushable)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum Platform {
     Linux,
@@ -125,7 +97,7 @@ pub enum Platform {
     Dive,
     Fuchsia,
     Redox,
-    Unknown(String),
+    Other(String),
 }
 
 impl From<whoami::Platform> for Platform {
@@ -143,15 +115,10 @@ impl From<whoami::Platform> for Platform {
             whoami::Platform::Dive => Platform::Dive,
             whoami::Platform::Fuchsia => Platform::Fuchsia,
             whoami::Platform::Redox => Platform::Redox,
-            whoami::Platform::Unknown(s) => Platform::Unknown(s),
-            unknown => Platform::Unknown(format!("{}", unknown)),
+            whoami::Platform::Unknown(s) => Platform::Other(s),
+            unknown => Platform::Other(format!("{}", unknown)),
         }
     }
-}
-
-pub fn load_platform(vm: &Thread) -> vm::Result<vm::ExternModule> {
-    let p: Platform = whoami::platform().into();
-    vm::ExternModule::new(vm, p)
 }
 
 pub enum OsType {
