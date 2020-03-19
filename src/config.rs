@@ -2,6 +2,8 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io;
 use std::io::BufReader;
+use std::mem::MaybeUninit;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use dirs;
@@ -51,12 +53,22 @@ pub struct Config {
 
 #[derive(Error, Debug)]
 pub enum DotfilesReadError {
+    #[error("no dotfiles lists found")]
+    NoneFound,
     #[error("couldn't open dotfiles")]
     File(#[from] io::Error),
     #[error("failed to parse as JSON / incorrect schema")]
     SerdeJson(#[from] serde_json::Error),
     #[error("failed to parse as YAML / incorrect schema")]
     SerdeYaml(#[from] serde_yaml::Error),
+}
+
+#[derive(Copy, Clone)]
+enum DotfilesFiletype {
+    Nix,
+    JSON,
+    TOML,
+    YAML,
 }
 
 impl Config {
@@ -109,22 +121,30 @@ impl Config {
         ]
     }
 
-    fn yaml_dotfiles(&self) -> Result<Dotfiles, DotfilesReadError> {
-        let paths = self.yaml_dotfiles_paths();
-        let mut last_err: Result<_, DotfilesReadError> = Ok(());
-        for path in paths {
-            match File::open(path) {
-                Ok(file) => match serde_yaml::from_reader(BufReader::new(file)) {
-                    Ok(dotfiles) => return Ok(dotfiles),
-                    Err(err) => last_err = Err(err.into()),
-                },
-                Err(err) => last_err = Err(err.into()),
-            }
-        }
-        // Note: unwrapping is OK because we know that
-        // self.yaml_dotfiles_paths() never returns an empty vector; therefore,
-        // either last_err will have an Err value or we'll have returned an Ok
-        // already.
-        Err(last_err.unwrap_err())
+    fn dotfiles_paths(&self) -> Vec<(PathBuf, DotfilesFiletype)> {
+        let mut res = vec![
+            (self.nix_dotfiles_path(), DotfilesFiletype::Nix),
+            (self.json_dotfiles_path(), DotfilesFiletype::JSON),
+            (self.toml_dotfiles_path(), DotfilesFiletype::TOML),
+        ];
+        self.yaml_dotfiles_paths()
+            .iter()
+            .map(|path| (path.to_path_buf(), DotfilesFiletype::YAML))
+            .for_each(|s| res.push(s));
+        res
+    }
+
+    fn dotfiles_path(&self) -> Result<(File, DotfilesFiletype), DotfilesReadError> {
+        self.dotfiles_paths()
+            .iter()
+            .filter(|(path, _)| path.exists())
+            .next()
+            .map(Result::Ok)
+            .unwrap_or(Err(DotfilesReadError::NoneFound))
+            .and_then(|(path, filetype)| {
+                File::open(path)
+                    .map(|file| (file, *filetype))
+                    .map_err(Into::into)
+            })
     }
 }
