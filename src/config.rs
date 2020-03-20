@@ -1,11 +1,9 @@
 use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::fs::Metadata;
 use std::io;
 use std::io::BufReader;
 use std::io::Read;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use dirs;
@@ -14,6 +12,8 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::link::Dotfile;
+use crate::nix;
+use crate::nix::NixEvalError;
 
 lazy_static! {
     static ref CONFIG_DIR_NAME: &'static Path = Path::new("dotfile-manager");
@@ -65,6 +65,8 @@ pub enum DotfilesReadError {
     SerdeYAML(#[from] serde_yaml::Error),
     #[error("failed to parse as TOML / incorrect schema")]
     SerdeTOML(#[from] toml::de::Error),
+    #[error("{0}")]
+    NixEval(#[from] NixEvalError),
 }
 
 #[derive(Copy, Clone)]
@@ -138,7 +140,7 @@ impl Config {
         res
     }
 
-    fn dotfiles_path(&self) -> Result<(File, DotfilesFiletype), DotfilesReadError> {
+    fn dotfiles_path(&self) -> Result<(PathBuf, File, DotfilesFiletype), DotfilesReadError> {
         self.dotfiles_paths()
             .iter()
             .filter(|(path, _)| path.exists())
@@ -147,13 +149,13 @@ impl Config {
             .unwrap_or(Err(DotfilesReadError::NoneFound))
             .and_then(|(path, filetype)| {
                 File::open(path)
-                    .map(|file| (file, *filetype))
+                    .map(|file| (path.clone(), file, *filetype))
                     .map_err(Into::into)
             })
     }
 
     fn dotfiles(&self) -> Result<Dotfiles, DotfilesReadError> {
-        let (mut file, filetype) = self.dotfiles_path()?;
+        let (path, mut file, filetype) = self.dotfiles_path()?;
         match filetype {
             DotfilesFiletype::JSON => {
                 serde_json::from_reader(BufReader::new(file)).map_err(Into::into)
@@ -169,11 +171,14 @@ impl Config {
                         .and_then(|len| len.try_into().map_err(|_| ()))
                         .unwrap_or(2048usize),
                 );
-                file.read_to_string(&mut s);
+                file.read_to_string(&mut s).map_err(DotfilesReadError::from)?;
                 toml::from_str(&s).map_err(Into::into)
             }
             DotfilesFiletype::Nix => {
-                Err(DotfilesReadError::NoneFound)
+                nix::eval_file(&path).map_err(|err| match err {
+                    NixEvalError::SerdeJSON(err) => DotfilesReadError::SerdeJSON(err),
+                    err => DotfilesReadError::NixEval(err),
+                })
             }
         }
     }
