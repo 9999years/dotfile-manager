@@ -30,6 +30,14 @@ lazy_static! {
     };
 }
 
+fn file_size(file: &File, default: usize) -> usize {
+    file.metadata()
+        .map(|m| m.len())
+        .map_err(|_| ())
+        .and_then(|len| len.try_into().map_err(|_| ()))
+        .unwrap_or(default)
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(untagged)]
 pub enum AnyDotfile {
@@ -69,7 +77,7 @@ pub enum DotfilesReadError {
     NixEval(#[from] NixEvalError),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum DotfilesFiletype {
     Nix,
     JSON,
@@ -110,12 +118,6 @@ impl Config {
         self.dotfiles_filename("json")
     }
 
-    fn json_dotfiles(&self) -> Result<Dotfiles, DotfilesReadError> {
-        Ok(serde_json::from_reader(BufReader::new(&File::open(
-            self.json_dotfiles_path(),
-        )?))?)
-    }
-
     fn toml_dotfiles_path(&self) -> PathBuf {
         self.dotfiles_filename("toml")
     }
@@ -148,34 +150,27 @@ impl Config {
             .map(Result::Ok)
             .unwrap_or(Err(DotfilesReadError::NoneFound))
             .and_then(|(path, filetype)| {
-                File::open(path)
-                    .map(|file| (path.clone(), file, *filetype))
-                    .map_err(Into::into)
+                Ok(File::open(path).map(|file| (path.clone(), file, *filetype))?)
             })
     }
 
-    fn dotfiles(&self) -> Result<Dotfiles, DotfilesReadError> {
+    pub fn dotfiles(&self) -> Result<Dotfiles, DotfilesReadError> {
         let (path, mut file, filetype) = self.dotfiles_path()?;
         match filetype {
             DotfilesFiletype::JSON => {
-                serde_json::from_reader(BufReader::new(file)).map_err(Into::into)
+                Ok(serde_json::from_reader::<_, DotfilesWrapper>(BufReader::new(file))?.dotfiles)
             }
             DotfilesFiletype::YAML => {
-                serde_yaml::from_reader(BufReader::new(file)).map_err(Into::into)
+                Ok(serde_yaml::from_reader::<_, DotfilesWrapper>(BufReader::new(file))?.dotfiles)
             }
             DotfilesFiletype::TOML => {
-                let mut s = String::with_capacity(
-                    file.metadata()
-                        .map(|m| m.len())
-                        .map_err(|_| ())
-                        .and_then(|len| len.try_into().map_err(|_| ()))
-                        .unwrap_or(2048usize),
-                );
-                file.read_to_string(&mut s).map_err(DotfilesReadError::from)?;
-                toml::from_str(&s).map_err(Into::into)
+                let mut s = String::with_capacity(file_size(&file, 2048usize));
+                file.read_to_string(&mut s)?;
+                Ok(toml::from_str::<DotfilesWrapper>(&s)?.dotfiles)
             }
             DotfilesFiletype::Nix => {
                 nix::eval_file(&path).map_err(|err| match err {
+                    // Don't use multiple json serde error types
                     NixEvalError::SerdeJSON(err) => DotfilesReadError::SerdeJSON(err),
                     err => DotfilesReadError::NixEval(err),
                 })
