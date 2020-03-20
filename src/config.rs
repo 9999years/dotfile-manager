@@ -1,8 +1,10 @@
+use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::fs::File;
+use std::fs::Metadata;
 use std::io;
 use std::io::BufReader;
-use std::mem::MaybeUninit;
+use std::io::Read;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
@@ -58,9 +60,11 @@ pub enum DotfilesReadError {
     #[error("couldn't open dotfiles")]
     File(#[from] io::Error),
     #[error("failed to parse as JSON / incorrect schema")]
-    SerdeJson(#[from] serde_json::Error),
+    SerdeJSON(#[from] serde_json::Error),
     #[error("failed to parse as YAML / incorrect schema")]
-    SerdeYaml(#[from] serde_yaml::Error),
+    SerdeYAML(#[from] serde_yaml::Error),
+    #[error("failed to parse as TOML / incorrect schema")]
+    SerdeTOML(#[from] toml::de::Error),
 }
 
 #[derive(Copy, Clone)]
@@ -146,5 +150,31 @@ impl Config {
                     .map(|file| (file, *filetype))
                     .map_err(Into::into)
             })
+    }
+
+    fn dotfiles(&self) -> Result<Dotfiles, DotfilesReadError> {
+        let (mut file, filetype) = self.dotfiles_path()?;
+        match filetype {
+            DotfilesFiletype::JSON => {
+                serde_json::from_reader(BufReader::new(file)).map_err(Into::into)
+            }
+            DotfilesFiletype::YAML => {
+                serde_yaml::from_reader(BufReader::new(file)).map_err(Into::into)
+            }
+            DotfilesFiletype::TOML => {
+                let mut s = String::with_capacity(
+                    file.metadata()
+                        .map(|m| m.len())
+                        .map_err(|_| ())
+                        .and_then(|len| len.try_into().map_err(|_| ()))
+                        .unwrap_or(2048usize),
+                );
+                file.read_to_string(&mut s);
+                toml::from_str(&s).map_err(Into::into)
+            }
+            DotfilesFiletype::Nix => {
+                Err(DotfilesReadError::NoneFound)
+            }
+        }
     }
 }
