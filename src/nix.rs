@@ -38,3 +38,32 @@ pub fn eval_file<T: DeserializeOwned>(path: &Path) -> Result<T, NixEvalError> {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn nix_eval_file() {
+        let res = dbg!(eval_file::<Vec<String>>(&PathBuf::from("test-data/string-list.nix")));
+        // Allow tests to pass on systems without Nix installed.
+        if res.is_err() {
+            assert!(matches!(res, Err(NixEvalError::NoNix(_))));
+        } else {
+            assert_eq!(res.unwrap(), vec!["foo", "bar", "baz"]);
+        }
+    }
+
+    #[test]
+    fn nix_eval_missing_file() {
+        let res = dbg!(eval_file::<Vec<String>>(&PathBuf::from("test-data/doesnt-exist.sldgkjaslj")));
+        assert!(matches!(res, Err(NixEvalError::EvalFailed(_))));
+        if let NixEvalError::EvalFailed(err) = res.unwrap_err() {
+            assert!(err.starts_with("error: getting status of"));
+            assert!(err.ends_with(": No such file or directory\n"));
+        }
+    }
+}

@@ -56,6 +56,13 @@ impl AbsDotfile {
     }
 }
 
+fn home_dir() -> io::Result<PathBuf> {
+    dirs::home_dir()
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "Home directory not found")
+        })
+}
+
 impl TryFrom<Dotfile> for AbsDotfile {
     type Error = io::Error;
 
@@ -63,11 +70,7 @@ impl TryFrom<Dotfile> for AbsDotfile {
         Ok(AbsDotfile {
             repo: make_abs(&CONFIG.dotfile_repo, &d.repo),
             installed: make_abs(
-                dirs::home_dir()
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::NotFound, "Home directory not found")
-                    })?
-                    .as_path(),
+                home_dir()?.as_path(),
                 d.installed(),
             ),
         })
@@ -95,7 +98,7 @@ fn make_abs(base: &Path, p: &Path) -> PathBuf {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, PartialEq)]
 pub struct Dotfile {
     /// The dotfile's path, relative to the dotfile repository.
     repo: PathBuf,
@@ -116,5 +119,51 @@ impl From<PathBuf> for Dotfile {
 impl Dotfile {
     fn installed(&self) -> &Path {
         &self.installed.as_ref().unwrap_or(&self.repo)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::PathBuf;
+
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn dotfile_installed() {
+        assert_eq!(
+            Dotfile {
+                repo: "foo".into(),
+                installed: Some("bar".into()),
+            }.installed(),
+            &PathBuf::from("bar"),
+        );
+
+        assert_eq!(
+            Dotfile {
+                repo: "baz".into(),
+                installed: None,
+            }.installed(),
+            &PathBuf::from("baz"),
+        );
+    }
+
+    #[test]
+    fn dotfile_from_path() {
+        assert_eq!(
+            Dotfile::from(PathBuf::from("xxx")),
+            Dotfile {
+                repo: "xxx".into(),
+                installed: None,
+            }
+        );
+    }
+
+    #[test]
+    fn abs_dotfile_try_from() {
+        // assert_eq!(
+        //     AbsDotfile::try_from(AnyDotfile::Plain("xxx".into())),
+        // );
     }
 }
