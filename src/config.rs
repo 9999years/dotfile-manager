@@ -145,8 +145,7 @@ impl Config {
     fn dotfiles_path(&self) -> Result<(PathBuf, File, DotfilesFiletype), DotfilesReadError> {
         self.dotfiles_paths()
             .iter()
-            .filter(|(path, _)| path.exists())
-            .next()
+            .find(|(path, _)| path.exists())
             .map(Result::Ok)
             .unwrap_or(Err(DotfilesReadError::NoneFound))
             .and_then(|(path, filetype)| {
