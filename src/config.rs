@@ -30,6 +30,8 @@ lazy_static! {
     };
 }
 
+/// Atttempt to determine the size of a given `File`, or return a default; useful
+/// for initializing strings.
 fn file_size(file: &File, default: usize) -> usize {
     file.metadata()
         .map(|m| m.len())
@@ -55,28 +57,47 @@ pub struct DotfilesWrapper {
     pub dotfiles: Dotfiles,
 }
 
+/// The configuration data for the dotfile-manager program.
 #[derive(Deserialize, Default)]
 pub struct Config {
+    /// The directory where dotfiles are stored; if not absolute, interpreted as
+    /// relative to the user's home directory.
     pub dotfile_repo: PathBuf,
+    /// Basename of the dotfiles list file; default `dotfiles`. Relative to
+    /// `dotfile_repo`.
     pub dotfiles_basename: PathBuf,
 }
 
+/// An error when reading/deserializing a dotfiles list file.
 #[derive(Error, Debug)]
 pub enum DotfilesReadError {
+    /// Could not find any dotfiles list files.
     #[error("no dotfiles lists found")]
     NoneFound,
+
+    /// Error while opening a dotfiles list file.
     #[error("couldn't open dotfiles")]
     File(#[from] io::Error),
+
+    /// Deserialization error (JSON); includes deserialization from evaluated Nix
+    /// expression language output.
     #[error("failed to parse as JSON / incorrect schema")]
     SerdeJSON(#[from] serde_json::Error),
+
+    /// Deserialization error (YAML).
     #[error("failed to parse as YAML / incorrect schema")]
     SerdeYAML(#[from] serde_yaml::Error),
+
+    /// Deserialization error (TOML).
     #[error("failed to parse as TOML / incorrect schema")]
     SerdeTOML(#[from] toml::de::Error),
+
+    /// Evaluation error (Nix expression language).
     #[error("{0}")]
     NixEval(#[from] NixEvalError),
 }
 
+/// The file format of a dotfiles list file.
 #[derive(Copy, Clone, Debug)]
 enum DotfilesFiletype {
     Nix,
@@ -86,7 +107,7 @@ enum DotfilesFiletype {
 }
 
 impl Config {
-    fn try_default() -> Option<Self> {
+    pub fn try_default() -> Option<Self> {
         Some(Config {
             dotfile_repo: [&dirs::home_dir()?, *DEFAULT_DOTFILE_REPO_NAME]
                 .iter()
