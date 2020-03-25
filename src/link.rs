@@ -7,7 +7,8 @@ use dialoguer::{theme::ColorfulTheme, Confirmation};
 use serde::Deserialize;
 use symlink;
 
-use crate::config::{AnyDotfile, CONFIG};
+use crate::config::{SerdeDotfile, CONFIG};
+use crate::util::{home_dir, make_abs};
 
 /// A `Dotfile` struct fully resolved to canonical paths.
 #[derive(Debug)]
@@ -56,54 +57,35 @@ impl AbsDotfile {
     }
 }
 
-fn home_dir() -> io::Result<PathBuf> {
-    dirs::home_dir()
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "Home directory not found")
-        })
-}
-
 impl TryFrom<Dotfile> for AbsDotfile {
     type Error = io::Error;
 
     fn try_from(d: Dotfile) -> io::Result<Self> {
         Ok(AbsDotfile {
             repo: make_abs(&CONFIG.dotfile_repo, &d.repo),
-            installed: make_abs(
-                home_dir()?.as_path(),
-                d.installed(),
-            ),
+            installed: make_abs(home_dir()?.as_path(), d.installed()),
         })
     }
 }
 
-impl TryFrom<AnyDotfile> for AbsDotfile {
+impl TryFrom<SerdeDotfile> for AbsDotfile {
     type Error = io::Error;
 
-    fn try_from(df: AnyDotfile) -> io::Result<Self> {
+    fn try_from(df: SerdeDotfile) -> io::Result<Self> {
         match df {
-            AnyDotfile::Plain(p) => Dotfile::from(p),
-            AnyDotfile::Advanced(d) => d,
+            SerdeDotfile::Path(p) => Dotfile::from(p),
+            SerdeDotfile::Advanced(d) => d,
         }
         .try_into()
     }
 }
 
-fn make_abs(base: &Path, p: &Path) -> PathBuf {
-    if p.is_absolute() {
-        p.canonicalize().unwrap_or_else(|_| p.into())
-    } else {
-        let abs = [base, p].iter().collect::<PathBuf>();
-        abs.canonicalize().unwrap_or(abs)
-    }
-}
-
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Dotfile {
     /// The dotfile's path, relative to the dotfile repository.
     repo: PathBuf,
     /// The dotfile's path, relative to your home directory. If left unspecified,
-    /// this is the same as `path`.
+    /// this is the same as `repo`.
     installed: Option<PathBuf>,
 }
 
@@ -116,8 +98,21 @@ impl From<PathBuf> for Dotfile {
     }
 }
 
+impl From<SerdeDotfile> for Dotfile {
+    fn from(d: SerdeDotfile) -> Self {
+        match d {
+            SerdeDotfile::Path(p) => p.into(),
+            SerdeDotfile::Advanced(d) => d,
+        }
+    }
+}
+
 impl Dotfile {
-    fn installed(&self) -> &Path {
+    pub fn repo(&self) -> &Path {
+        &self.repo
+    }
+
+    pub fn installed(&self) -> &Path {
         &self.installed.as_ref().unwrap_or(&self.repo)
     }
 }
@@ -136,7 +131,8 @@ mod test {
             Dotfile {
                 repo: "foo".into(),
                 installed: Some("bar".into()),
-            }.installed(),
+            }
+            .installed(),
             &PathBuf::from("bar"),
         );
 
@@ -144,7 +140,8 @@ mod test {
             Dotfile {
                 repo: "baz".into(),
                 installed: None,
-            }.installed(),
+            }
+            .installed(),
             &PathBuf::from("baz"),
         );
     }
@@ -163,7 +160,7 @@ mod test {
     #[test]
     fn abs_dotfile_try_from() {
         // assert_eq!(
-        //     AbsDotfile::try_from(AnyDotfile::Plain("xxx".into())),
+        //     AbsDotfile::try_from(SerdeDotfile::Path("xxx".into())),
         // );
     }
 }

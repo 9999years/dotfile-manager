@@ -11,9 +11,10 @@ use lazy_static::lazy_static;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::link::Dotfile;
+use crate::link::{AbsDotfile, Dotfile};
 use crate::nix;
 use crate::nix::NixEvalError;
+use crate::util::{file_size, home_dir, make_abs};
 
 lazy_static! {
     static ref CONFIG_DIR_NAME: &'static Path = Path::new("dotfile-manager");
@@ -30,31 +31,28 @@ lazy_static! {
     };
 }
 
-/// Atttempt to determine the size of a given `File`, or return a default; useful
-/// for initializing strings.
-fn file_size(file: &File, default: usize) -> usize {
-    file.metadata()
-        .map(|m| m.len())
-        .map_err(|_| ())
-        .and_then(|len| len.try_into().map_err(|_| ()))
-        .unwrap_or(default)
-}
-
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
-pub enum AnyDotfile {
+enum SerdeDotfile {
     // TODO: better names...
-    Plain(PathBuf),
+    Path(PathBuf),
     Advanced(Dotfile),
 }
 
-pub type Dotfiles = Vec<AnyDotfile>;
-
+/// A wrapper struct for use when deserializing a dotfile list.
 #[derive(Deserialize)]
-pub struct DotfilesWrapper {
+struct SerdeDotfileList {
+    /// Allow a `$schema` identifier for formats/programs that support it (mostly
+    /// JSON).
     #[serde(rename = "$schema")]
-    pub schema: String,
-    pub dotfiles: Dotfiles,
+    schema: Option<String>,
+    dotfiles: Vec<SerdeDotfile>,
+}
+
+impl SerdeDotfileList {
+    fn dotfiles(&self) -> Vec<Dotfile> {
+        self.dotfiles.iter().cloned().map(Into::into).collect()
+    }
 }
 
 /// The configuration data for the dotfile-manager program.
@@ -99,11 +97,22 @@ pub enum DotfilesReadError {
 
 /// The file format of a dotfiles list file.
 #[derive(Copy, Clone, Debug)]
-enum DotfilesFiletype {
+enum DotfileListFiletype {
     Nix,
     JSON,
     TOML,
     YAML,
+}
+
+impl DotfileListFiletype {
+    fn extensions(self) -> Vec<PathBuf> {
+        match self {
+            DotfileListFiletype::Nix => vec!["nix".into()],
+            DotfileListFiletype::JSON => vec!["json".into()],
+            DotfileListFiletype::TOML => vec!["toml".into()],
+            DotfileListFiletype::YAML => vec!["yaml".into(), "yml".into()],
+        }
+    }
 }
 
 impl Config {
@@ -131,39 +140,27 @@ impl Config {
         .collect::<PathBuf>()
     }
 
-    fn nix_dotfiles_path(&self) -> PathBuf {
-        self.dotfiles_filename("nix")
-    }
-
-    fn json_dotfiles_path(&self) -> PathBuf {
-        self.dotfiles_filename("json")
-    }
-
-    fn toml_dotfiles_path(&self) -> PathBuf {
-        self.dotfiles_filename("toml")
-    }
-
-    fn yaml_dotfiles_paths(&self) -> Vec<PathBuf> {
+    fn dotfiles_paths(&self) -> Vec<(PathBuf, DotfileListFiletype)> {
         vec![
-            self.dotfiles_filename("yml"),
-            self.dotfiles_filename("yaml"),
+            DotfileListFiletype::Nix,
+            DotfileListFiletype::JSON,
+            DotfileListFiletype::TOML,
+            DotfileListFiletype::YAML,
         ]
+        .iter()
+        .map(|filetype| {
+            filetype
+                .extensions()
+                .iter()
+                .map(|ext| self.dotfiles_filename(ext))
+                .map(|filename| (filename, *filetype))
+                .collect::<Vec<_>>()
+        })
+        .flatten()
+        .collect()
     }
 
-    fn dotfiles_paths(&self) -> Vec<(PathBuf, DotfilesFiletype)> {
-        let mut res = vec![
-            (self.nix_dotfiles_path(), DotfilesFiletype::Nix),
-            (self.json_dotfiles_path(), DotfilesFiletype::JSON),
-            (self.toml_dotfiles_path(), DotfilesFiletype::TOML),
-        ];
-        self.yaml_dotfiles_paths()
-            .iter()
-            .map(|path| (path.to_path_buf(), DotfilesFiletype::YAML))
-            .for_each(|s| res.push(s));
-        res
-    }
-
-    fn dotfiles_path(&self) -> Result<(PathBuf, File, DotfilesFiletype), DotfilesReadError> {
+    fn dotfiles_path(&self) -> Result<(PathBuf, File, DotfileListFiletype), DotfilesReadError> {
         self.dotfiles_paths()
             .iter()
             .find(|(path, _)| path.exists())
@@ -174,21 +171,23 @@ impl Config {
             })
     }
 
-    pub fn dotfiles(&self) -> Result<Dotfiles, DotfilesReadError> {
+    pub fn dotfiles(&self) -> Result<Vec<Dotfile>, DotfilesReadError> {
         let (path, mut file, filetype) = self.dotfiles_path()?;
         match filetype {
-            DotfilesFiletype::JSON => {
-                Ok(serde_json::from_reader::<_, DotfilesWrapper>(BufReader::new(file))?.dotfiles)
-            }
-            DotfilesFiletype::YAML => {
-                Ok(serde_yaml::from_reader::<_, DotfilesWrapper>(BufReader::new(file))?.dotfiles)
-            }
-            DotfilesFiletype::TOML => {
+            DotfileListFiletype::JSON => Ok(serde_json::from_reader::<_, SerdeDotfileList>(
+                BufReader::new(file),
+            )?
+            .dotfiles()),
+            DotfileListFiletype::YAML => Ok(serde_yaml::from_reader::<_, SerdeDotfileList>(
+                BufReader::new(file),
+            )?
+            .dotfiles()),
+            DotfileListFiletype::TOML => {
                 let mut s = String::with_capacity(file_size(&file, 2048usize));
                 file.read_to_string(&mut s)?;
-                Ok(toml::from_str::<DotfilesWrapper>(&s)?.dotfiles)
+                Ok(toml::from_str::<SerdeDotfileList>(&s)?.dotfiles())
             }
-            DotfilesFiletype::Nix => {
+            DotfileListFiletype::Nix => {
                 nix::eval_file(&path).map_err(|err| match err {
                     // Don't use multiple json serde error types
                     NixEvalError::SerdeJSON(err) => DotfilesReadError::SerdeJSON(err),
@@ -196,5 +195,12 @@ impl Config {
                 })
             }
         }
+    }
+
+    pub fn canonicalize_dotfile(d: Dotfile) -> io::Result<AbsDotfile> {
+        Ok(AbsDotfile {
+            repo: make_abs(&CONFIG.dotfile_repo, d.repo()),
+            installed: make_abs(home_dir()?.as_path(), d.installed()),
+        })
     }
 }
