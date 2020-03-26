@@ -29,11 +29,11 @@ fn main() {
 }
 
 fn main_inner() -> Result<(), MainError> {
-    let cfg_path: PathBuf = dbg!(config::config_file())?;
-    let cfg = Config::try_from(cfg_path.as_path()).or_else(|err| match err {
-        ConfigReadError::NotFound(_) => Config::try_default(),
-        err => Err(err),
-    })?;
+    let cfg =
+        Config::try_from(dbg!(config::config_file())?.as_path()).or_else(|err| match err {
+            ConfigReadError::NotFound(_) => Config::try_default(),
+            err => Err(err),
+        })?;
     println!("Configuration: {:?}", cfg);
     let abs_dotfiles = cfg
         .dotfiles()?
