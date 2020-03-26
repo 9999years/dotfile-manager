@@ -11,3 +11,4 @@ coverage:
         --branch \
         --ignore-not-existing \
         -o ./target/debug/coverage/
+    echo $PWD/target/debug/coverage/index.html

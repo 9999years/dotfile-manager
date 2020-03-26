@@ -239,3 +239,66 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn test_config_file() {
+        let cfg = config_file().unwrap();
+        assert!(cfg.ends_with("dotfile-manager/dotfile-manager.toml"));
+    }
+
+    #[test]
+    fn serde_dotfile_list() {
+        let dotfiles: SerdeDotfileList = serde_json::from_str(
+            r#"
+                {
+                    "$schema": "...",
+                    "dotfiles": [
+                        "ok",
+                        {
+                            "repo": "repo-path",
+                            "installed": "installed-path"
+                        },
+                        "great"
+                    ]
+                }
+                "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            dotfiles.dotfiles,
+            vec![
+                SerdeDotfile::Path("ok".into()),
+                SerdeDotfile::Advanced(Dotfile {
+                    repo: "repo-path".into(),
+                    installed: Some("installed-path".into()),
+                }),
+                SerdeDotfile::Path("great".into()),
+            ]
+        );
+
+        assert_eq!(
+            dotfiles.dotfiles(),
+            vec![
+                Dotfile {
+                    repo: "ok".into(),
+                    installed: None
+                },
+                Dotfile {
+                    repo: "repo-path".into(),
+                    installed: Some("installed-path".into()),
+                },
+                Dotfile {
+                    repo: "great".into(),
+                    installed: None
+                },
+            ]
+        );
+    }
+}

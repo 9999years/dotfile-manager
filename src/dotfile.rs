@@ -9,7 +9,7 @@ use symlink;
 use crate::config::Config;
 use crate::util::{home_dir, make_abs};
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum SerdeDotfile {
     Path(PathBuf),
@@ -82,10 +82,10 @@ impl AbsDotfile {
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Dotfile {
     /// The dotfile's path, relative to the dotfile repository.
-    repo: PathBuf,
+    pub repo: PathBuf,
     /// The dotfile's path, relative to your home directory. If left unspecified,
     /// this is the same as `repo`.
-    installed: Option<PathBuf>,
+    pub installed: Option<PathBuf>,
 }
 
 impl From<PathBuf> for Dotfile {
