@@ -1,6 +1,7 @@
 use std::convert::TryInto;
 use std::fs::File;
 use std::io;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub fn make_abs(base: &Path, p: &Path) -> PathBuf {
@@ -25,4 +26,10 @@ pub fn file_size(file: &File, default: usize) -> usize {
 pub fn home_dir() -> io::Result<PathBuf> {
     dirs::home_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Home directory not found"))
+}
+
+pub fn file_to_string(file: &mut File) -> io::Result<String> {
+    let mut s = String::with_capacity(file_size(&file, 2048usize));
+    file.read_to_string(&mut s)?;
+    Ok(s)
 }

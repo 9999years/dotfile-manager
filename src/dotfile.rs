@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -7,8 +6,24 @@ use dialoguer::{theme::ColorfulTheme, Confirmation};
 use serde::Deserialize;
 use symlink;
 
-use crate::config::CONFIG;
+use crate::config::Config;
 use crate::util::{home_dir, make_abs};
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum SerdeDotfile {
+    Path(PathBuf),
+    Advanced(Dotfile),
+}
+
+impl From<SerdeDotfile> for Dotfile {
+    fn from(d: SerdeDotfile) -> Self {
+        match d {
+            SerdeDotfile::Path(p) => p.into(),
+            SerdeDotfile::Advanced(d) => d,
+        }
+    }
+}
 
 /// A `Dotfile` struct fully resolved to canonical paths.
 #[derive(Debug)]
@@ -20,6 +35,13 @@ pub struct AbsDotfile {
 }
 
 impl AbsDotfile {
+    pub fn new(d: &Dotfile, cfg: &Config) -> io::Result<Self> {
+        Ok(Self {
+            repo: make_abs(&cfg.dotfile_repo, d.repo()),
+            installed: make_abs(home_dir()?.as_path(), d.installed()),
+        })
+    }
+
     pub fn link(&self) -> io::Result<()> {
         if cfg!(unix) || self.repo.is_file() {
             symlink::symlink_file(&self.repo, &self.installed)
@@ -54,17 +76,6 @@ impl AbsDotfile {
             }
         }
         self.link()
-    }
-}
-
-impl TryFrom<Dotfile> for AbsDotfile {
-    type Error = io::Error;
-
-    fn try_from(d: Dotfile) -> io::Result<Self> {
-        Ok(AbsDotfile {
-            repo: make_abs(&CONFIG.dotfile_repo, &d.repo),
-            installed: make_abs(home_dir()?.as_path(), d.installed()),
-        })
     }
 }
 

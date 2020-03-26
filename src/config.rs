@@ -1,10 +1,8 @@
 use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io;
-use std::io::BufReader;
-use std::io::Read;
+use std::io::{BufReader, ErrorKind};
 use std::path::{Path, PathBuf};
 
 use dirs;
@@ -12,53 +10,35 @@ use lazy_static::lazy_static;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::link::{AbsDotfile, Dotfile};
+use crate::dotfile::{Dotfile, SerdeDotfile};
 use crate::nix;
 use crate::nix::NixEvalError;
-use crate::util::{file_size, home_dir, make_abs};
+use crate::util::file_to_string;
 
 lazy_static! {
     static ref CONFIG_DIR_NAME: &'static Path = Path::new("dotfile-manager");
     static ref DEFAULT_DOTFILE_REPO_NAME: &'static Path = Path::new(".dotfiles");
-    static ref CONFIG_DIR: io::Result<PathBuf> = {
-        // TODO don't unwrap
-        [&dirs::config_dir().unwrap(), *CONFIG_DIR_NAME]
-            .iter()
-            .collect::<PathBuf>()
-            .canonicalize()
-    };
-    pub static ref CONFIG: Config = {
-        Config::try_default().unwrap_or_default()
-    };
+    static ref CONFIG_FILE_NAME: &'static Path = Path::new("dotfile-manager.toml");
+    pub static ref CONFIG: Config = { Config::try_default().unwrap_or_default() };
 }
 
-#[derive(Deserialize, Debug, Clone)]
-#[serde(untagged)]
-enum SerdeDotfile {
-    // TODO: better names...
-    Path(PathBuf),
-    Advanced(Dotfile),
+/// Configuration directory, e.g. ~/.config/dotfile-manager on Linux.
+fn config_dir() -> io::Result<PathBuf> {
+    Ok([
+        &dirs::config_dir()
+            .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "Config directory not found."))?,
+        *CONFIG_DIR_NAME,
+    ]
+    .iter()
+    .collect::<PathBuf>())
 }
 
-impl TryFrom<SerdeDotfile> for AbsDotfile {
-    type Error = io::Error;
-
-    fn try_from(df: SerdeDotfile) -> io::Result<Self> {
-        match df {
-            SerdeDotfile::Path(p) => Dotfile::from(p),
-            SerdeDotfile::Advanced(d) => d,
-        }
-        .try_into()
-    }
-}
-
-impl From<SerdeDotfile> for Dotfile {
-    fn from(d: SerdeDotfile) -> Self {
-        match d {
-            SerdeDotfile::Path(p) => p.into(),
-            SerdeDotfile::Advanced(d) => d,
-        }
-    }
+/// Configuration file path, e.g. ~/.config/dotfile-manager/dotfile-manager.toml
+/// on Linux.
+pub fn config_file() -> io::Result<PathBuf> {
+    Ok([&config_dir()?, *CONFIG_FILE_NAME]
+        .iter()
+        .collect::<PathBuf>())
 }
 
 /// A wrapper struct for use when deserializing a dotfile list.
@@ -72,21 +52,19 @@ struct SerdeDotfileList {
     dotfiles: Vec<SerdeDotfile>,
 }
 
+impl From<Vec<SerdeDotfile>> for SerdeDotfileList {
+    fn from(v: Vec<SerdeDotfile>) -> Self {
+        Self {
+            schema: None,
+            dotfiles: v,
+        }
+    }
+}
+
 impl SerdeDotfileList {
     fn dotfiles(&self) -> Vec<Dotfile> {
         self.dotfiles.iter().cloned().map(Into::into).collect()
     }
-}
-
-/// The configuration data for the dotfile-manager program.
-#[derive(Deserialize, Default)]
-pub struct Config {
-    /// The directory where dotfiles are stored; if not absolute, interpreted as
-    /// relative to the user's home directory.
-    pub dotfile_repo: PathBuf,
-    /// Basename of the dotfiles list file; default `dotfiles`. Relative to
-    /// `dotfile_repo`.
-    pub dotfiles_basename: PathBuf,
 }
 
 /// An error when reading/deserializing a dotfiles list file.
@@ -138,12 +116,52 @@ impl DotfileListFiletype {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ConfigReadError {
+    #[error("dirs crate failed to find home directory")]
+    NoHome,
+
+    #[error("config file {0} doesn't exist")]
+    NotFound(PathBuf),
+
+    #[error("failed to open/read config file")]
+    File(#[from] io::Error),
+
+    #[error("failed to parse config file as TOML / incorrect schema")]
+    SerdeTOML(#[from] toml::de::Error),
+}
+
+/// The configuration data for the dotfile-manager program.
+#[derive(Deserialize, Default, Debug, Clone, PartialEq)]
+pub struct Config {
+    /// The directory where dotfiles are stored; if not absolute, interpreted as
+    /// relative to the user's home directory.
+    pub dotfile_repo: PathBuf,
+    /// Basename of the dotfiles list file; default `dotfiles`. Relative to
+    /// `dotfile_repo`.
+    pub dotfiles_basename: PathBuf,
+}
+
+impl TryFrom<&Path> for Config {
+    type Error = ConfigReadError;
+
+    fn try_from(p: &Path) -> Result<Self, <Self as TryFrom<&Path>>::Error> {
+        if !p.exists() {
+            return Err(ConfigReadError::NotFound(p.to_path_buf()));
+        }
+        Ok(toml::from_str(&file_to_string(&mut File::open(p)?)?)?)
+    }
+}
+
 impl Config {
-    pub fn try_default() -> Option<Self> {
-        Some(Config {
-            dotfile_repo: [&dirs::home_dir()?, *DEFAULT_DOTFILE_REPO_NAME]
-                .iter()
-                .collect::<PathBuf>(),
+    pub fn try_default() -> Result<Self, ConfigReadError> {
+        Ok(Config {
+            dotfile_repo: [
+                &dirs::home_dir().ok_or(ConfigReadError::NoHome)?,
+                *DEFAULT_DOTFILE_REPO_NAME,
+            ]
+            .iter()
+            .collect::<PathBuf>(),
             dotfiles_basename: PathBuf::from("dotfiles"),
         })
     }
@@ -206,24 +224,18 @@ impl Config {
             )?
             .dotfiles()),
             DotfileListFiletype::TOML => {
-                let mut s = String::with_capacity(file_size(&file, 2048usize));
-                file.read_to_string(&mut s)?;
-                Ok(toml::from_str::<SerdeDotfileList>(&s)?.dotfiles())
+                Ok(toml::from_str::<SerdeDotfileList>(&file_to_string(&mut file)?)?.dotfiles())
             }
             DotfileListFiletype::Nix => {
-                nix::eval_file(&path).map_err(|err| match err {
-                    // Don't use multiple json serde error types
-                    NixEvalError::SerdeJSON(err) => DotfilesReadError::SerdeJSON(err),
-                    err => DotfilesReadError::NixEval(err),
-                })
+                let list: SerdeDotfileList = nix::eval_file::<Vec<SerdeDotfile>>(&path)
+                    .map_err(|err| match err {
+                        // Don't use multiple json serde error types
+                        NixEvalError::SerdeJSON(err) => DotfilesReadError::SerdeJSON(err),
+                        err => DotfilesReadError::NixEval(err),
+                    })?
+                    .into();
+                Ok(list.dotfiles())
             }
         }
-    }
-
-    pub fn canonicalize_dotfile(d: Dotfile) -> io::Result<AbsDotfile> {
-        Ok(AbsDotfile {
-            repo: make_abs(&CONFIG.dotfile_repo, d.repo()),
-            installed: make_abs(home_dir()?.as_path(), d.installed()),
-        })
     }
 }

@@ -1,4 +1,4 @@
 pub mod config;
-pub mod link;
+pub mod dotfile;
 pub mod nix;
 pub mod util;

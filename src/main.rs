@@ -1,17 +1,45 @@
-// use std::convert::{TryFrom, TryInto};
-// use std::fs::File;
-// use std::io::Read;
-// use std::path::{Path, PathBuf};
+use std::convert::TryFrom;
+use std::io;
+use std::path::PathBuf;
 
-// use dotfile_manager::config;
-// use dotfile_manager::config::AnyDotfile;
-use dotfile_manager::config::CONFIG;
-// use dotfile_manager::link::AbsDotfile;
+use thiserror::Error;
+
+use dotfile_manager::config;
+use dotfile_manager::config::{Config, ConfigReadError, DotfilesReadError};
+use dotfile_manager::dotfile::AbsDotfile;
+
+#[derive(Debug, Error)]
+enum MainError {
+    #[error("{0}")]
+    Io(#[from] io::Error),
+
+    #[error("{0}")]
+    ConfigRead(#[from] ConfigReadError),
+
+    #[error("{0}")]
+    DotfilesRead(#[from] DotfilesReadError),
+}
 
 fn main() {
-    println!("{:?}", CONFIG.dotfiles());
-    // for df in dotfiles {
-    // let abs_df: AbsDotfile = df.try_into().unwrap();
-    // println!("{:?}", abs_df);
-    // }
+    let main_ret = main_inner();
+    if let Err(err) = main_ret {
+        println!("Error: {}", err);
+        println!("{:?}", err)
+    }
+}
+
+fn main_inner() -> Result<(), MainError> {
+    let cfg_path: PathBuf = dbg!(config::config_file())?;
+    let cfg = Config::try_from(cfg_path.as_path()).or_else(|err| match err {
+        ConfigReadError::NotFound(_) => Config::try_default(),
+        err => Err(err),
+    })?;
+    println!("Configuration: {:?}", cfg);
+    let abs_dotfiles = cfg
+        .dotfiles()?
+        .iter()
+        .map(|d| AbsDotfile::new(d, &cfg))
+        .collect::<Result<Vec<_>, _>>()?;
+    println!("Dotfiles: {:?}", abs_dotfiles);
+    Ok(())
 }
