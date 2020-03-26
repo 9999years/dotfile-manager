@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -39,11 +40,33 @@ enum SerdeDotfile {
     Advanced(Dotfile),
 }
 
+impl TryFrom<SerdeDotfile> for AbsDotfile {
+    type Error = io::Error;
+
+    fn try_from(df: SerdeDotfile) -> io::Result<Self> {
+        match df {
+            SerdeDotfile::Path(p) => Dotfile::from(p),
+            SerdeDotfile::Advanced(d) => d,
+        }
+        .try_into()
+    }
+}
+
+impl From<SerdeDotfile> for Dotfile {
+    fn from(d: SerdeDotfile) -> Self {
+        match d {
+            SerdeDotfile::Path(p) => p.into(),
+            SerdeDotfile::Advanced(d) => d,
+        }
+    }
+}
+
 /// A wrapper struct for use when deserializing a dotfile list.
 #[derive(Deserialize)]
 struct SerdeDotfileList {
     /// Allow a `$schema` identifier for formats/programs that support it (mostly
     /// JSON).
+    #[allow(dead_code)]
     #[serde(rename = "$schema")]
     schema: Option<String>,
     dotfiles: Vec<SerdeDotfile>,

@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use dialoguer::{theme::ColorfulTheme, Confirmation};
 use serde::Deserialize;
 use symlink;
 
-use crate::config::{SerdeDotfile, CONFIG};
+use crate::config::CONFIG;
 use crate::util::{home_dir, make_abs};
 
 /// A `Dotfile` struct fully resolved to canonical paths.
@@ -68,18 +68,6 @@ impl TryFrom<Dotfile> for AbsDotfile {
     }
 }
 
-impl TryFrom<SerdeDotfile> for AbsDotfile {
-    type Error = io::Error;
-
-    fn try_from(df: SerdeDotfile) -> io::Result<Self> {
-        match df {
-            SerdeDotfile::Path(p) => Dotfile::from(p),
-            SerdeDotfile::Advanced(d) => d,
-        }
-        .try_into()
-    }
-}
-
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Dotfile {
     /// The dotfile's path, relative to the dotfile repository.
@@ -94,15 +82,6 @@ impl From<PathBuf> for Dotfile {
         Self {
             repo: p,
             installed: None,
-        }
-    }
-}
-
-impl From<SerdeDotfile> for Dotfile {
-    fn from(d: SerdeDotfile) -> Self {
-        match d {
-            SerdeDotfile::Path(p) => p.into(),
-            SerdeDotfile::Advanced(d) => d,
         }
     }
 }

@@ -4,7 +4,6 @@ use std::env;
 use futures::executor::{block_on, block_on_stream};
 use heim::host::{Arch, Platform as HeimPlatform, User as HeimUser};
 use heim::net::{Address, Nic};
-use lazy_static::lazy_static;
 
 #[derive(Debug)]
 pub struct User(HeimUser);
