@@ -51,6 +51,10 @@ impl AbsDotfile {
     }
 
     fn should_overwrite(&self) -> io::Result<bool> {
+        // TODO: More choices, not y/n
+        // - verbose help
+        // - diff the two files
+        // - check if the files are the same (before this...?)
         Confirmation::with_theme(&ColorfulTheme::default())
             .with_text(&format!(
                 "Overwrite {} with a link to {}?",
@@ -123,7 +127,7 @@ mod test {
                 installed: Some("bar".into()),
             }
             .installed(),
-            &PathBuf::from("bar"),
+            Path::new("bar"),
         );
 
         assert_eq!(
@@ -132,7 +136,16 @@ mod test {
                 installed: None,
             }
             .installed(),
-            &PathBuf::from("baz"),
+            Path::new("baz"),
+        );
+
+        assert_eq!(
+            Dotfile {
+                repo: "baz".into(),
+                installed: None,
+            }
+            .repo(),
+            Path::new("baz"),
         );
     }
 
@@ -145,12 +158,5 @@ mod test {
                 installed: None,
             }
         );
-    }
-
-    #[test]
-    fn abs_dotfile_try_from() {
-        // assert_eq!(
-        //     AbsDotfile::try_from(SerdeDotfile::Path("xxx".into())),
-        // );
     }
 }

@@ -1,6 +1,5 @@
 use std::convert::TryFrom;
 use std::io;
-use std::path::PathBuf;
 
 use thiserror::Error;
 

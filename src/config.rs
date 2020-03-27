@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io;
@@ -19,7 +19,7 @@ lazy_static! {
     static ref CONFIG_DIR_NAME: &'static Path = Path::new("dotfile-manager");
     static ref DEFAULT_DOTFILE_REPO_NAME: &'static Path = Path::new(".dotfiles");
     static ref CONFIG_FILE_NAME: &'static Path = Path::new("dotfile-manager.toml");
-    pub static ref CONFIG: Config = { Config::try_default().unwrap_or_default() };
+    pub static ref CONFIG: Config = { Config::try_default().unwrap() };
 }
 
 /// Configuration directory, e.g. ~/.config/dotfile-manager on Linux.
@@ -131,8 +131,36 @@ pub enum ConfigReadError {
     SerdeTOML(#[from] toml::de::Error),
 }
 
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct SerdeConfig {
+    dotfile_repo: Option<PathBuf>,
+    dotfiles_basename: Option<PathBuf>,
+}
+
+impl TryFrom<SerdeConfig> for Config {
+    type Error = ConfigReadError;
+
+    fn try_from(cfg: SerdeConfig) -> Result<Self, ConfigReadError> {
+        Ok(Config {
+            dotfile_repo: cfg
+                .dotfile_repo
+                .ok_or(())
+                .or_else::<ConfigReadError, _>(|_| {
+                    Ok([
+                        &dirs::home_dir().ok_or(ConfigReadError::NoHome)?,
+                        *DEFAULT_DOTFILE_REPO_NAME,
+                    ]
+                    .iter()
+                    .collect())
+                })?,
+            dotfiles_basename: cfg.dotfiles_basename.unwrap_or_else(|| "dotfiles".into()),
+        })
+    }
+}
+
 /// The configuration data for the dotfile-manager program.
-#[derive(Deserialize, Default, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Config {
     /// The directory where dotfiles are stored; if not absolute, interpreted as
     /// relative to the user's home directory.
@@ -145,25 +173,17 @@ pub struct Config {
 impl TryFrom<&Path> for Config {
     type Error = ConfigReadError;
 
-    fn try_from(p: &Path) -> Result<Self, <Self as TryFrom<&Path>>::Error> {
+    fn try_from(p: &Path) -> Result<Self, ConfigReadError> {
         if !p.exists() {
             return Err(ConfigReadError::NotFound(p.to_path_buf()));
         }
-        Ok(toml::from_str(&file_to_string(&mut File::open(p)?)?)?)
+        toml::from_str::<SerdeConfig>(&file_to_string(&mut File::open(p)?)?)?.try_into()
     }
 }
 
 impl Config {
     pub fn try_default() -> Result<Self, ConfigReadError> {
-        Ok(Config {
-            dotfile_repo: [
-                &dirs::home_dir().ok_or(ConfigReadError::NoHome)?,
-                *DEFAULT_DOTFILE_REPO_NAME,
-            ]
-            .iter()
-            .collect::<PathBuf>(),
-            dotfiles_basename: PathBuf::from("dotfiles"),
-        })
+        SerdeConfig::default().try_into()
     }
 
     fn dotfiles_basename_extension<S: AsRef<OsStr>>(&self, extension: S) -> PathBuf {
@@ -182,7 +202,7 @@ impl Config {
     }
 
     fn dotfiles_paths(&self) -> Vec<(PathBuf, DotfileListFiletype)> {
-        vec![
+        [
             DotfileListFiletype::Nix,
             DotfileListFiletype::JSON,
             DotfileListFiletype::TOML,
@@ -242,6 +262,8 @@ impl Config {
 
 #[cfg(test)]
 mod test {
+    use std::convert::TryInto;
+
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -300,5 +322,77 @@ mod test {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn config_from_path() {
+        let cfg: Config = Path::new("test-data/dotfile-manager.toml")
+            .try_into()
+            .unwrap();
+        assert_eq!(
+            cfg,
+            Config {
+                dotfile_repo: ".dotfiles".into(),
+                dotfiles_basename: "dotfiles_list".into(),
+            }
+        );
+
+        let cfg_res: Result<Config, ConfigReadError> =
+            Path::new("test-data/nonexistent-cfg.toml").try_into();
+        assert_eq!(
+            format!("{:?}", cfg_res),
+            "Err(NotFound(\"test-data/nonexistent-cfg.toml\"))"
+        );
+
+        let cfg: Config = Path::new("test-data/dotfile-manager-empty.toml")
+            .try_into()
+            .unwrap();
+        assert_eq!(cfg, Config::try_default().unwrap());
+    }
+
+    fn test_config() -> Config {
+        Config {
+            dotfile_repo: "test-data/".into(),
+            dotfiles_basename: "dotfiles".into(),
+        }
+    }
+
+    fn sample_dotfiles() -> Vec<Dotfile> {
+        vec![
+            Dotfile {
+                repo: ".bash_profile".into(),
+                installed: None,
+            },
+            Dotfile {
+                repo: ".bashrc".into(),
+                installed: None,
+            },
+            Dotfile {
+                repo: ".curlrc".into(),
+                installed: None,
+            },
+            Dotfile {
+                repo: ".config/fisher_local/fishfile".into(),
+                installed: Some(".config/fish/fishfile".into()),
+            },
+        ]
+    }
+
+    #[test]
+    fn config_dotfiles() {
+        let cfg_dotfiles = |ext: &str| {
+            Config {
+                dotfiles_basename: format!("dotfiles-{}", ext).into(),
+                ..test_config()
+            }
+            .dotfiles()
+            .unwrap()
+        };
+
+        assert_eq!(cfg_dotfiles("json"), sample_dotfiles());
+        assert_eq!(cfg_dotfiles("yaml"), sample_dotfiles());
+        assert_eq!(cfg_dotfiles("yml"), sample_dotfiles());
+        assert_eq!(cfg_dotfiles("toml"), sample_dotfiles());
+        assert_eq!(cfg_dotfiles("nix"), sample_dotfiles());
     }
 }

@@ -1,0 +1,3 @@
+# Relative to the user's home dir
+dotfile_repo = ".dotfiles"
+dotfiles_basename = "dotfiles_list"
