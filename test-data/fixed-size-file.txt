@@ -1,0 +1,2 @@
+This file has a fixed size; if you modify its size, tests will break. In
+particular, tests for util::file_size.

@@ -16,6 +16,15 @@ pub enum SerdeDotfile {
     Advanced(Dotfile),
 }
 
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct Dotfile {
+    /// The dotfile's path, relative to the dotfile repository.
+    pub repo: PathBuf,
+    /// The dotfile's path, relative to your home directory. If left unspecified,
+    /// this is the same as `repo`.
+    pub installed: Option<PathBuf>,
+}
+
 impl From<SerdeDotfile> for Dotfile {
     fn from(d: SerdeDotfile) -> Self {
         match d {
@@ -25,8 +34,27 @@ impl From<SerdeDotfile> for Dotfile {
     }
 }
 
+impl From<PathBuf> for Dotfile {
+    fn from(p: PathBuf) -> Self {
+        Self {
+            repo: p,
+            installed: None,
+        }
+    }
+}
+
+impl Dotfile {
+    pub fn repo(&self) -> &Path {
+        &self.repo
+    }
+
+    pub fn installed(&self) -> &Path {
+        &self.installed.as_ref().unwrap_or(&self.repo)
+    }
+}
+
 /// A `Dotfile` struct fully resolved to canonical paths.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AbsDotfile {
     /// The dotfile's path in the dotfile repository.
     pub repo: PathBuf,
@@ -83,36 +111,9 @@ impl AbsDotfile {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
-pub struct Dotfile {
-    /// The dotfile's path, relative to the dotfile repository.
-    pub repo: PathBuf,
-    /// The dotfile's path, relative to your home directory. If left unspecified,
-    /// this is the same as `repo`.
-    pub installed: Option<PathBuf>,
-}
-
-impl From<PathBuf> for Dotfile {
-    fn from(p: PathBuf) -> Self {
-        Self {
-            repo: p,
-            installed: None,
-        }
-    }
-}
-
-impl Dotfile {
-    pub fn repo(&self) -> &Path {
-        &self.repo
-    }
-
-    pub fn installed(&self) -> &Path {
-        &self.installed.as_ref().unwrap_or(&self.repo)
-    }
-}
-
 #[cfg(test)]
 mod test {
+    use std::env;
     use std::path::PathBuf;
 
     use pretty_assertions::assert_eq;
@@ -150,12 +151,68 @@ mod test {
     }
 
     #[test]
-    fn dotfile_from_path() {
+    fn dotfile_from_pathbuf() {
         assert_eq!(
             Dotfile::from(PathBuf::from("xxx")),
             Dotfile {
                 repo: "xxx".into(),
                 installed: None,
+            }
+        );
+    }
+
+    #[test]
+    fn absdotfile_new() {
+        let cwd = env::current_dir().unwrap();
+        let cfg = Config {
+            dotfile_repo: cwd.clone(),
+            dotfiles_basename: "dotfiles".into(),
+        };
+
+        assert_eq!(
+            AbsDotfile::new(
+                &Dotfile {
+                    repo: ".bashrc_fake".into(),
+                    installed: None,
+                },
+                &cfg
+            )
+            .unwrap(),
+            AbsDotfile {
+                repo: cwd.join(".bashrc_fake"),
+                installed: home_dir().unwrap().join(".bashrc_fake"),
+            }
+        );
+
+        assert_eq!(
+            AbsDotfile::new(
+                &Dotfile {
+                    repo: ".bashrc_fake".into(),
+                    // Don't do this:
+                    installed: Some(".bash_profile_fake".into()),
+                },
+                &cfg
+            )
+            .unwrap(),
+            AbsDotfile {
+                repo: cwd.join(".bashrc_fake"),
+                installed: home_dir().unwrap().join(".bash_profile_fake"),
+            }
+        );
+
+        assert_eq!(
+            AbsDotfile::new(
+                &Dotfile {
+                    repo: ".bashrc_fake".into(),
+                    // REALLY don't do this
+                    installed: Some("/tmp".into()),
+                },
+                &cfg
+            )
+            .unwrap(),
+            AbsDotfile {
+                repo: cwd.join(".bashrc_fake"),
+                installed: "/tmp".into(),
             }
         );
     }
